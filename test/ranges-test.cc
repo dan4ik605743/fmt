@@ -12,8 +12,6 @@
 #include "fmt/ranges.h"
 
 #include <map>
-#include <queue>
-#include <stack>
 #include <string>
 #include <vector>
 
@@ -52,14 +50,6 @@ TEST(ranges_test, format_vector) {
   EXPECT_EQ(fmt::format("{}", v), "[1, 2, 3, 5, 7, 11]");
   EXPECT_EQ(fmt::format("{::#x}", v), "[0x1, 0x2, 0x3, 0x5, 0x7, 0xb]");
   EXPECT_EQ(fmt::format("{:n:#x}", v), "0x1, 0x2, 0x3, 0x5, 0x7, 0xb");
-
-  auto vc = std::vector<char>{'a', 'b', 'c'};
-  auto vvc = std::vector<std::vector<char>>{vc, vc};
-  EXPECT_EQ(fmt::format("{}", vc), "['a', 'b', 'c']");
-  EXPECT_EQ(fmt::format("{}", vvc), "[['a', 'b', 'c'], ['a', 'b', 'c']]");
-  EXPECT_EQ(fmt::format("{:n}", vvc), "['a', 'b', 'c'], ['a', 'b', 'c']");
-  EXPECT_EQ(fmt::format("{:n:n}", vvc), "'a', 'b', 'c', 'a', 'b', 'c'");
-  EXPECT_EQ(fmt::format("{:n:n:}", vvc), "a, b, c, a, b, c");
 }
 
 TEST(ranges_test, format_vector2) {
@@ -170,6 +160,19 @@ TEST(ranges_test, path_like) {
   EXPECT_FALSE((fmt::is_range<path_like, char>::value));
 }
 
+#ifdef FMT_USE_STRING_VIEW
+struct string_like {
+  const char* begin();
+  const char* end();
+  operator fmt::string_view() const { return "foo"; }
+  operator std::string_view() const { return "foo"; }
+};
+
+TEST(ranges_test, format_string_like) {
+  EXPECT_EQ(fmt::format("{}", string_like()), "foo");
+}
+#endif  // FMT_USE_STRING_VIEW
+
 // A range that provides non-const only begin()/end() to test fmt::join handles
 // that.
 //
@@ -195,7 +198,7 @@ template <typename T> class noncopyable_range {
   std::vector<T> vec;
 
  public:
-  using iterator = typename ::std::vector<T>::iterator;
+  using const_iterator = typename ::std::vector<T>::const_iterator;
 
   template <typename... Args>
   explicit noncopyable_range(Args&&... args)
@@ -204,8 +207,8 @@ template <typename T> class noncopyable_range {
   noncopyable_range(noncopyable_range const&) = delete;
   noncopyable_range(noncopyable_range&) = delete;
 
-  iterator begin() { return vec.begin(); }
-  iterator end() { return vec.end(); }
+  const_iterator begin() const { return vec.begin(); }
+  const_iterator end() const { return vec.end(); }
 };
 
 TEST(ranges_test, range) {
@@ -390,6 +393,17 @@ TEST(ranges_test, escape_string) {
   }
 }
 
+#ifdef FMT_USE_STRING_VIEW
+struct convertible_to_string_view {
+  operator std::string_view() const { return "foo"; }
+};
+
+TEST(ranges_test, escape_convertible_to_string_view) {
+  EXPECT_EQ(fmt::format("{}", std::vector<convertible_to_string_view>(1)),
+            "[\"foo\"]");
+}
+#endif  // FMT_USE_STRING_VIEW
+
 template <typename R> struct fmt_ref_view {
   R* r;
 
@@ -407,63 +421,4 @@ TEST(ranges_test, range_of_range_of_mixed_const) {
 
 TEST(ranges_test, vector_char) {
   EXPECT_EQ(fmt::format("{}", std::vector<char>{'a', 'b'}), "['a', 'b']");
-}
-
-TEST(ranges_test, container_adaptor) {
-  {
-    using fmt::detail::is_container_adaptor_like;
-    using T = std::nullptr_t;
-    static_assert(is_container_adaptor_like<std::stack<T>>::value, "");
-    static_assert(is_container_adaptor_like<std::queue<T>>::value, "");
-    static_assert(is_container_adaptor_like<std::priority_queue<T>>::value, "");
-    static_assert(!is_container_adaptor_like<std::vector<T>>::value, "");
-  }
-
-  {
-    std::stack<int> s;
-    s.push(1);
-    s.push(2);
-    EXPECT_EQ(fmt::format("{}", s), "[1, 2]");
-    EXPECT_EQ(fmt::format("{}", const_cast<const decltype(s)&>(s)), "[1, 2]");
-  }
-
-  {
-    std::queue<int> q;
-    q.push(1);
-    q.push(2);
-    EXPECT_EQ(fmt::format("{}", q), "[1, 2]");
-  }
-
-  {
-    std::priority_queue<int> q;
-    q.push(3);
-    q.push(1);
-    q.push(2);
-    q.push(4);
-    EXPECT_EQ(fmt::format("{}", q), "[4, 3, 2, 1]");
-  }
-
-  {
-    std::stack<char, std::string> s;
-    s.push('a');
-    s.push('b');
-    // See https://cplusplus.github.io/LWG/issue3881.
-    EXPECT_EQ(fmt::format("{}", s), "['a', 'b']");
-  }
-
-  {
-    struct my_container_adaptor {
-      using value_type = int;
-      using container_type = std::vector<value_type>;
-      void push(const value_type& v) { c.push_back(v); }
-
-     protected:
-      container_type c;
-    };
-
-    my_container_adaptor m;
-    m.push(1);
-    m.push(2);
-    EXPECT_EQ(fmt::format("{}", m), "[1, 2]");
-  }
 }
